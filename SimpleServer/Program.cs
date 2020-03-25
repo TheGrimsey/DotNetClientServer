@@ -117,8 +117,8 @@ namespace SimpleServer
 
         private static void HandleChatmessage(Packet packet)
         {
-            //Convert message to unicode string. Skip index 0 because that is where the packet type is
-            string Message = System.Text.Encoding.Unicode.GetString(packet.Data, 1, packet.Data.Length-1);
+            //Convert message to unicode string
+            string Message = System.Text.Encoding.Unicode.GetString(packet.Data, 0, packet.Data.Length-1);
 
             //Remove newline at the end of string if it exists.
             if (Message.EndsWith(Environment.NewLine))
@@ -134,28 +134,17 @@ namespace SimpleServer
             //Accept client packets until we are cancelled.
             while(!cancellationToken.IsCancellationRequested)
             {
-                //Data Buffer.
-                byte[] Data = new byte[1024];
-                //Grab data into buffer in async.
-                int DataSize = await client.GetStream().ReadAsync(Data, 0, Data.Length);
+                NetworkStream stream = client.GetStream();
 
-                //Convert buffer to raw byte array.
-                byte[] Packet = new byte[DataSize];
-                Array.Copy(Data, 0, Packet, 0, DataSize);
+                //Read packetSize.
+                byte[] packetSizeBuffer = new byte[sizeof(int)];
+                await stream.ReadAsync(packetSizeBuffer, 0, sizeof(int));
 
-                //Check so we have data.
-                if (Packet.Length > 0)
-                {
-                    //Grab first byte. This is our PacketType.
-                    int PacketType = Packet[0];
+                //Create databuffer with packetSize.
+                byte[] packetData = new byte[BitConverter.ToInt32(packetSizeBuffer, 0)];
+                stream.Read(packetData, 0, packetData.Length);
 
-                    //Make sure it is a valid packettype.
-                    if (Enum.IsDefined(typeof(EPacketType), PacketType))
-                    {
-                        //Put it in the recieved packets queue to be dealt with on the main thread.
-                        recievedPackets.Enqueue(new SimpleCommon.Packet(client, (EPacketType)PacketType, Packet));
-                    }
-                }
+                recievedPackets.Enqueue(PacketConverter.ReadPacketFromByteArray(client, packetData));
             }
         }
 

@@ -28,15 +28,11 @@ namespace SimpleClient
         //Queue of packets to send to server.
         ConcurrentQueue<byte[]> PacketsToSend;
 
-        //CancellationTokenSource used for cancelling HandleInput()
-        CancellationTokenSource cancellationTokenSource;
-
         public SimpleClient()
         {
             SetUpServerConnection();
 
             PacketsToSend = new ConcurrentQueue<byte[]>();
-            cancellationTokenSource = new CancellationTokenSource();
 
             Console.WriteLine("Connected to server!");
 
@@ -105,16 +101,8 @@ namespace SimpleClient
             //Convert message to byte array.
             byte[] MessageAsBytes = System.Text.Encoding.Unicode.GetBytes(message);
 
-            //Create packet array with one extra space for the packettype.
-            byte[] Packet = new byte[MessageAsBytes.Length + 1];
-            
-            //Copy message into packet at a one index offset. 
-            Array.Copy(MessageAsBytes, 0, Packet, 1, MessageAsBytes.Length);
-
-            //Assign packet type.
-            Packet[0] = (byte)EPacketType.ChatMessage;
-
-            PacketsToSend.Enqueue(Packet);
+            //Queue packet
+            PacketsToSend.Enqueue(PacketConverter.CreatePacketByteArray(EPacketType.ChatMessage, MessageAsBytes));
         }
 
         /*
