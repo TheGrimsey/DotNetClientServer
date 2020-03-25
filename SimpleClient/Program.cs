@@ -2,7 +2,6 @@
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Threading;
-using System.Threading.Tasks;
 using SimpleCommon;
 
 namespace SimpleClient
@@ -81,10 +80,7 @@ namespace SimpleClient
             {
                 Console.WriteLine("TEST");
 
-                Task<string> readTask =  Console.In.ReadLineAsync();
-                readTask.Wait();
-
-                string Input = readTask.Result;
+                string Input =  Console.ReadLine();
 
                 //Check if this is a command. (Command start with a slash)
                 if(Input.StartsWith("/"))
