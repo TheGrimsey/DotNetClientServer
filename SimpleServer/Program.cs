@@ -77,7 +77,7 @@ namespace SimpleServer
                 TcpClient newClient = tcpListener.AcceptTcpClient();
                 connectedClients.Add(newClient);
 
-                AcceptClientPacket(newClient, cancellationTokenSource.Token);
+                _ = AcceptClientPacket(newClient, cancellationTokenSource.Token);
 
             }
             catch (Exception e)
@@ -99,7 +99,7 @@ namespace SimpleServer
                     }
                 }
                 
-                Thread.Sleep(100);
+                Thread.Sleep(50);
 
             }
             //We exited the IsRunning loop so we are closing down the server.
