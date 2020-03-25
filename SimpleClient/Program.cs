@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Threading;
+using System.Threading.Tasks;
 using SimpleCommon;
 
 namespace SimpleClient
@@ -23,22 +24,32 @@ namespace SimpleClient
         //Our connection to the server.
         TcpClient _tcpClient;
 
-        const int DefaultPort = 2002;
+        const int DEFAULTPORT = 2002;
 
         //Queue of packets to send to server.
-        ConcurrentQueue<byte[]> PacketsToSend;
+        ConcurrentQueue<byte[]> _packetsToSend;
+
+        //Queue of packets recieved from the server.
+        ConcurrentQueue<Packet> _packetsRecieved;
+
+        CancellationTokenSource cancellationTokenSource;
 
         public SimpleClient()
         {
             SetUpServerConnection();
 
-            PacketsToSend = new ConcurrentQueue<byte[]>();
+            _packetsToSend = new ConcurrentQueue<byte[]>();
+            _packetsRecieved = new ConcurrentQueue<Packet>();
+
+            cancellationTokenSource = new CancellationTokenSource();
 
             Console.WriteLine("Connected to server!");
 
             //Start listening to input on secondary thread.
             Thread inputThread = new Thread(new ThreadStart(HandleInput));
             inputThread.Start();
+
+            _ = AcceptServerPacketAsync(_tcpClient, cancellationTokenSource.Token);
 
             Console.WriteLine("Starting packet sending..");
 
@@ -48,17 +59,20 @@ namespace SimpleClient
                 Thread.Sleep(50);
 
                 //Go through all PacketsToSend and send them.
-                byte[] Packet;
+                byte[] packetBuffer;
                 NetworkStream stream = _tcpClient.GetStream();
 
-                while (PacketsToSend.TryDequeue(out Packet))
+                while (_packetsToSend.TryDequeue(out packetBuffer))
                 {
-                    stream.Write(Packet, 0, Packet.Length);
+                    stream.Write(packetBuffer, 0, packetBuffer.Length);
                 }
 
                 //TODO: Read packets.
-
-                //Note: We could in theory send multiple packets at once and save some overhead but that requires work on splitting them up on the server.
+                Packet packet;
+                while(_packetsRecieved.TryDequeue(out packet))
+                {
+                    Console.WriteLine("Recieved packet of type: " + packet.PacketType);
+                }
             }
 
             Console.WriteLine("Disconnected from server. Press ENTER to exit.");
@@ -74,21 +88,38 @@ namespace SimpleClient
             //Read input until we disconnect.
             while(_tcpClient.Connected)
             {
-                Console.WriteLine("TEST");
-
-                string Input =  Console.ReadLine();
+                string input =  Console.ReadLine();
 
                 //Check if this is a command. (Command start with a slash)
-                if(Input.StartsWith("/"))
+                if(input.StartsWith("/"))
                 {
                     //This is a command. Let's deal with it.
-                    Console.WriteLine(string.Format("Command {0} Not implemented."), Input); //Dealt with it.
+                    Console.WriteLine(string.Format("Command {0} Not implemented."), input); //Dealt with it.
                 }
                 else
                 {
                     //Nothing special with this so let's just treat it as a normal message.
-                    SendChatMessageToServer(Input);
+                    SendChatMessageToServer(input);
                 }
+            }
+        }
+
+        async Task AcceptServerPacketAsync(TcpClient client, CancellationToken cancellationToken)
+        {
+            //Accept client packets until we are cancelled.
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                NetworkStream stream = client.GetStream();
+
+                //Read packetSize.
+                byte[] packetSizeBuffer = new byte[sizeof(int)];
+                await stream.ReadAsync(packetSizeBuffer, 0, sizeof(int));
+
+                //Create databuffer with packetSize.
+                byte[] packetData = new byte[BitConverter.ToInt32(packetSizeBuffer, 0)];
+                stream.Read(packetData, 0, packetData.Length);
+
+                _packetsRecieved.Enqueue(PacketConverter.ReadPacketFromByteArray(client, packetData));
             }
         }
 
@@ -99,10 +130,10 @@ namespace SimpleClient
         void SendChatMessageToServer(string message)
         {
             //Convert message to byte array.
-            byte[] MessageAsBytes = System.Text.Encoding.Unicode.GetBytes(message);
+            byte[] messageAsBytes = System.Text.Encoding.Unicode.GetBytes(message);
 
             //Queue packet
-            PacketsToSend.Enqueue(PacketConverter.CreatePacketByteArray(EPacketType.ChatMessage, MessageAsBytes));
+            _packetsToSend.Enqueue(PacketConverter.CreatePacketByteArray(EPacketType.ChatMessage, messageAsBytes));
         }
 
         /*
@@ -129,7 +160,7 @@ namespace SimpleClient
                     //Get address from first part of input.
                     string address = input[0];
                     //Set port to default value.
-                    int port = DefaultPort;
+                    int port = DEFAULTPORT;
 
                     //If we have more than one then the second one should be the port.
                     if (input.Length > 1)

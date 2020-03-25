@@ -53,7 +53,7 @@ namespace SimpleCommon
          * Reads data into Packet.
          * This assumes the byte array is structured as follows: [PacketType][Data]
          */
-        public static Packet ReadPacketFromByteArray(TcpClient sender, byte[] Data)
+        public static Packet ReadPacketFromByteArray(TcpClient Sender, byte[] Data)
         {
             Packet packet = new Packet();
 
@@ -80,7 +80,7 @@ namespace SimpleCommon
                 stream.Read(packetData, 0, packetData.Length);
 
                 //Now create the packet.
-                packet = new Packet(sender, packetType, packetData);
+                packet = new Packet(Sender, packetType, packetData);
             }
 
             return packet;

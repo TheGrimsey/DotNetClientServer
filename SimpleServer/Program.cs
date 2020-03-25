@@ -37,36 +37,42 @@ namespace SimpleServer
 
     class SimpleServer
     {
-        const int DefaultPort = 2002;
+        const int DEFAULTPORT = 2002;
 
         //Information used to connect to the database.
         MySQLConnectionInfo _mySQLconnectionInfo;
 
-        bool isRunning;
+        bool _isRunning;
 
-        TcpListener tcpListener;
+        TcpListener _tcpListener;
 
         //Connections to clients.
-        List<TcpClient> connectedClients;
-        //All recieved and not dealt with packets.
-        ConcurrentQueue<Packet> recievedPackets;
+        List<TcpClient> _connectedClients;
 
-        CancellationTokenSource cancellationTokenSource;
+        //All recieved and not dealt with packets.
+        ConcurrentQueue<Packet> _packetsRecieved;
+
+        //Packets to send out to clients.
+        ConcurrentQueue<Packet> _packetsToSend;
+        
+        //Cancellation token used for async tasks.
+        CancellationTokenSource _cancellationTokenSource;
         public SimpleServer(MySQLConnectionInfo mySQLConnectionInfo)
         {
             _mySQLconnectionInfo = mySQLConnectionInfo;
 
-            isRunning = true;
+            _isRunning = true;
 
             //Create tcpListener.
             IPAddress iPAddress = IPAddress.Parse("127.0.0.1"); //Localhost
-            tcpListener = new TcpListener(iPAddress, DefaultPort);
-            tcpListener.Start();
+            _tcpListener = new TcpListener(iPAddress, DEFAULTPORT);
+            _tcpListener.Start();
 
-            connectedClients = new List<TcpClient>();
-            recievedPackets = new ConcurrentQueue<Packet>();
+            _connectedClients = new List<TcpClient>();
+            _packetsRecieved = new ConcurrentQueue<Packet>();
+            _packetsToSend = new ConcurrentQueue<Packet>();
 
-            cancellationTokenSource = new CancellationTokenSource();
+            _cancellationTokenSource = new CancellationTokenSource();
 
             Console.WriteLine("Server has started.");
 
@@ -74,10 +80,10 @@ namespace SimpleServer
             try
             {
                 //Accept new client.
-                TcpClient newClient = tcpListener.AcceptTcpClient();
-                connectedClients.Add(newClient);
+                TcpClient newClient = _tcpListener.AcceptTcpClient();
+                _connectedClients.Add(newClient);
 
-                _ = AcceptClientPacket(newClient, cancellationTokenSource.Token);
+                _ = AcceptClientPacketAsync(newClient, _cancellationTokenSource.Token);
 
             }
             catch (Exception e)
@@ -85,10 +91,10 @@ namespace SimpleServer
                 Console.WriteLine("Exception when accepting new client: " + e.Message);
             }
 
-            while (isRunning)
+            while (_isRunning)
             {
                 Packet packet = new Packet();
-                while(recievedPackets.TryDequeue(out packet))
+                while(_packetsRecieved.TryDequeue(out packet))
                 {
                     //Determine which packet type it is so we can parse it.
                     switch (packet.PacketType)
@@ -96,6 +102,15 @@ namespace SimpleServer
                         case EPacketType.ChatMessage:
                             HandleChatmessage(packet);
                             break;
+                    }
+                }
+
+                while(_packetsToSend.TryDequeue(out packet))
+                {
+                    foreach(TcpClient tcpClient in _connectedClients)
+                    {
+                        byte[] packetByteArray = PacketConverter.CreatePacketByteArray(packet.PacketType, packet.Data);
+                        tcpClient.GetStream().Write(packetByteArray, 0, packetByteArray.Length);
                     }
                 }
                 
@@ -106,16 +121,16 @@ namespace SimpleServer
             Console.WriteLine("Closing server...");
 
             //Cancel all async operations.
-            cancellationTokenSource.Cancel();
+            _cancellationTokenSource.Cancel();
 
             //End all connections.
-            foreach (TcpClient client in connectedClients)
+            foreach (TcpClient client in _connectedClients)
             {
                 client.Close();
             }
         }
 
-        private static void HandleChatmessage(Packet packet)
+        private void HandleChatmessage(Packet packet)
         {
             //Convert message to unicode string
             string Message = System.Text.Encoding.Unicode.GetString(packet.Data, 0, packet.Data.Length-1);
@@ -127,9 +142,11 @@ namespace SimpleServer
             }
 
             Console.WriteLine("Client " + packet.Sender.Client.Handle + " says: " + Message);
+
+            _packetsToSend.Enqueue(packet);
         }
 
-        async Task AcceptClientPacket(TcpClient client, CancellationToken cancellationToken)
+        async Task AcceptClientPacketAsync(TcpClient client, CancellationToken cancellationToken)
         {
             //Accept client packets until we are cancelled.
             while(!cancellationToken.IsCancellationRequested)
@@ -144,7 +161,7 @@ namespace SimpleServer
                 byte[] packetData = new byte[BitConverter.ToInt32(packetSizeBuffer, 0)];
                 stream.Read(packetData, 0, packetData.Length);
 
-                recievedPackets.Enqueue(PacketConverter.ReadPacketFromByteArray(client, packetData));
+                _packetsRecieved.Enqueue(PacketConverter.ReadPacketFromByteArray(client, packetData));
             }
         }
 
