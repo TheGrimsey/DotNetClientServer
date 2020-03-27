@@ -24,8 +24,6 @@ namespace SimpleClient
         //Our connection to the server.
         TcpClient _tcpClient;
 
-        const int DEFAULTPORT = 2002;
-
         //Queue of packets to send to server.
         ConcurrentQueue<byte[]> _packetsToSend;
 
@@ -49,6 +47,7 @@ namespace SimpleClient
             Thread inputThread = new Thread(new ThreadStart(HandleInput));
             inputThread.Start();
 
+            //Accept packets from server in async.
             _ = AcceptServerPacketAsync(_tcpClient, cancellationTokenSource.Token);
 
             Console.WriteLine("Starting packet sending..");
@@ -67,16 +66,38 @@ namespace SimpleClient
                     stream.Write(packetBuffer, 0, packetBuffer.Length);
                 }
 
-                //TODO: Read packets.
                 Packet packet;
                 while(_packetsRecieved.TryDequeue(out packet))
                 {
-                    Console.WriteLine("Recieved packet of type: " + packet.PacketType);
+                    switch(packet.PacketType)
+                    {
+                        case EPacketType.ChatMessage:
+                            //Convert message to unicode string
+                            string Message = System.Text.Encoding.Unicode.GetString(packet.Data, 0, packet.Data.Length - 1);
+
+                            //Remove newline at the end of string if it exists.
+                            if (Message.EndsWith(Environment.NewLine))
+                            {
+                                Message = Message.Substring(0, Message.LastIndexOf(Environment.NewLine));
+                            }
+
+                            Console.WriteLine(Message);
+                            break;
+                    }
                 }
             }
 
             Console.WriteLine("Disconnected from server. Press ENTER to exit.");
             Console.ReadLine();
+        }
+
+        ~SimpleClient()
+        {
+            //Clean up connection.
+            if(_tcpClient != null && _tcpClient.Connected)
+            {
+                _tcpClient.Close();
+            }
         }
 
         /*
@@ -160,7 +181,7 @@ namespace SimpleClient
                     //Get address from first part of input.
                     string address = input[0];
                     //Set port to default value.
-                    int port = DEFAULTPORT;
+                    int port = Defaults.DEFAULTPORT;
 
                     //If we have more than one then the second one should be the port.
                     if (input.Length > 1)

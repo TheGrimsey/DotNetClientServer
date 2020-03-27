@@ -17,31 +17,12 @@ namespace SimpleServer
             Console.InputEncoding = System.Text.Encoding.Unicode;
             Console.OutputEncoding = System.Text.Encoding.Unicode;
 
-            SimpleServer server = new SimpleServer(new MySQLConnectionInfo("localhost", "root", "root"));
-        }
-    }
-
-    struct MySQLConnectionInfo
-    {
-        readonly string _address;
-        readonly string _user;
-        readonly string _password;
-
-        public MySQLConnectionInfo(string address = "localhost", string user = "root", string password = "root")
-        {
-            _address = address;
-            _user = user;
-            _password = password;
+            SimpleServer server = new SimpleServer();
         }
     }
 
     class SimpleServer
     {
-        const int DEFAULTPORT = 2002;
-
-        //Information used to connect to the database.
-        MySQLConnectionInfo _mySQLconnectionInfo;
-
         bool _isRunning;
 
         TcpListener _tcpListener;
@@ -57,15 +38,13 @@ namespace SimpleServer
         
         //Cancellation token used for async tasks.
         CancellationTokenSource _cancellationTokenSource;
-        public SimpleServer(MySQLConnectionInfo mySQLConnectionInfo)
+        public SimpleServer()
         {
-            _mySQLconnectionInfo = mySQLConnectionInfo;
-
             _isRunning = true;
 
             //Create tcpListener.
             IPAddress iPAddress = IPAddress.Parse("127.0.0.1"); //Localhost
-            _tcpListener = new TcpListener(iPAddress, DEFAULTPORT);
+            _tcpListener = new TcpListener(iPAddress, Defaults.DEFAULTPORT);
             _tcpListener.Start();
 
             _connectedClients = new List<TcpClient>();
@@ -76,24 +55,14 @@ namespace SimpleServer
 
             Console.WriteLine("Server has started.");
 
-            //Try to accept new client.
-            try
-            {
-                //Accept new client.
-                TcpClient newClient = _tcpListener.AcceptTcpClient();
-                _connectedClients.Add(newClient);
-
-                _ = AcceptClientPacketAsync(newClient, _cancellationTokenSource.Token);
-
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine("Exception when accepting new client: " + e.Message);
-            }
+            //Accept new clients in async.
+            _ = AcceptConnectionsAsync();
 
             while (_isRunning)
             {
-                Packet packet = new Packet();
+                Packet packet;
+
+                //Handle recieved packets.
                 while(_packetsRecieved.TryDequeue(out packet))
                 {
                     //Determine which packet type it is so we can parse it.
@@ -105,6 +74,7 @@ namespace SimpleServer
                     }
                 }
 
+                //Send packets we have queued up to send.
                 while(_packetsToSend.TryDequeue(out packet))
                 {
                     foreach(TcpClient tcpClient in _connectedClients)
@@ -141,9 +111,27 @@ namespace SimpleServer
                 Message = Message.Substring(0, Message.LastIndexOf(Environment.NewLine));
             }
 
-            Console.WriteLine("Client " + packet.Sender.Client.Handle + " says: " + Message);
+            string ClientMessage = "Client " + packet.Sender.Client.Handle + ": " + Message;
+            Console.WriteLine(ClientMessage);
 
-            _packetsToSend.Enqueue(packet);
+            //Packet we send out to clients.
+            Packet returnPacket = new Packet(packet.Sender, EPacketType.ChatMessage, System.Text.Encoding.Unicode.GetBytes(ClientMessage));
+
+            _packetsToSend.Enqueue(returnPacket);
+        }
+
+        async Task AcceptConnectionsAsync()
+        {
+            while (_isRunning)
+            {
+                TcpClient newClient = await _tcpListener.AcceptTcpClientAsync();
+                _connectedClients.Add(newClient);
+
+                OnClientConnected(newClient);
+
+                //Start accepting packets from client in async.
+                _ = AcceptClientPacketAsync(newClient, _cancellationTokenSource.Token);
+            }
         }
 
         async Task AcceptClientPacketAsync(TcpClient client, CancellationToken cancellationToken)
@@ -165,5 +153,16 @@ namespace SimpleServer
             }
         }
 
+        void OnClientConnected(TcpClient newClient)
+        {
+            //TODO EVENT
+            Console.WriteLine("Client {0} connected!", newClient.Client.Handle);
+        }
+
+        void OnClientDisconnected(TcpClient client)
+        {
+            Console.WriteLine("Client {0} disconnected!", client.Client.Handle);
+
+        }
     }
 }

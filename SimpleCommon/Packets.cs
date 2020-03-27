@@ -7,7 +7,9 @@ namespace SimpleCommon
     public enum EPacketType
     {
         None,
-        ChatMessage
+        ChatMessage,
+        ClientJoined,
+        ClientDisconnected
     }
 
     public struct Packet
