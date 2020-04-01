@@ -4,6 +4,12 @@ using System.Net.Sockets;
 
 namespace SimpleCommon
 {
+    //Delegate for packet handling.
+    public delegate void HandlePacketDelegate(Packet packet);
+
+    /*
+     * Enum for identifying a packet by.
+     */
     public enum EPacketType
     {
         None,
@@ -12,6 +18,10 @@ namespace SimpleCommon
         ClientDisconnected
     }
 
+    /*
+     * Packet struct.
+     * This is an actual packet.
+     */
     public struct Packet
     {
         private readonly TcpClient _sender;

@@ -13,11 +13,15 @@ namespace SimpleServer
     {
         static void Main(string[] args)
         {
+            //Set up console.
             Console.Title = "SimpleServer";
             Console.InputEncoding = System.Text.Encoding.Unicode;
             Console.OutputEncoding = System.Text.Encoding.Unicode;
 
             SimpleServer server = new SimpleServer();
+            ServerPacketHandler serverPacketHandler = new ServerPacketHandler(server);
+
+            server.Run();
         }
     }
 
@@ -38,6 +42,10 @@ namespace SimpleServer
         
         //Cancellation token used for async tasks.
         CancellationTokenSource _cancellationTokenSource;
+
+        //Packet handlers.
+        Dictionary<EPacketType, HandlePacketDelegate> _packetHandlers;
+
         public SimpleServer()
         {
             _isRunning = true;
@@ -53,6 +61,15 @@ namespace SimpleServer
 
             _cancellationTokenSource = new CancellationTokenSource();
 
+            _packetHandlers = new Dictionary<EPacketType, HandlePacketDelegate>();
+        }
+
+        /*
+         * Run Server.
+         * Starts networking and main loop.
+         */
+        public void Run()
+        {
             Console.WriteLine("Server has started.");
 
             //Accept new clients in async.
@@ -63,30 +80,40 @@ namespace SimpleServer
                 Packet packet;
 
                 //Handle recieved packets.
-                while(_packetsRecieved.TryDequeue(out packet))
+                while (_packetsRecieved.TryDequeue(out packet))
                 {
-                    //Determine which packet type it is so we can parse it.
-                    switch (packet.PacketType)
+                    //Grab packet handler if it exists.
+                    HandlePacketDelegate packetDelegate;
+                    if (_packetHandlers.TryGetValue(packet.PacketType, out packetDelegate))
                     {
-                        case EPacketType.ChatMessage:
-                            HandleChatmessage(packet);
-                            break;
+                        packetDelegate.Invoke(packet);
                     }
                 }
 
                 //Send packets we have queued up to send.
-                while(_packetsToSend.TryDequeue(out packet))
+                while (_packetsToSend.TryDequeue(out packet))
                 {
-                    foreach(TcpClient tcpClient in _connectedClients)
+                    foreach (TcpClient tcpClient in _connectedClients)
                     {
                         byte[] packetByteArray = PacketConverter.CreatePacketByteArray(packet.PacketType, packet.Data);
                         tcpClient.GetStream().Write(packetByteArray, 0, packetByteArray.Length);
                     }
                 }
-                
+
                 Thread.Sleep(50);
 
             }
+
+            CloseServer();
+        }
+
+        /*
+         * Closes the server. 
+         * Cancelling async operations & closing sockets.
+         * There is no comming back from this.
+         */
+        void CloseServer()
+        {
             //We exited the IsRunning loop so we are closing down the server.
             Console.WriteLine("Closing server...");
 
@@ -98,26 +125,6 @@ namespace SimpleServer
             {
                 client.Close();
             }
-        }
-
-        private void HandleChatmessage(Packet packet)
-        {
-            //Convert message to unicode string
-            string Message = System.Text.Encoding.Unicode.GetString(packet.Data, 0, packet.Data.Length-1);
-
-            //Remove newline at the end of string if it exists.
-            if (Message.EndsWith(Environment.NewLine))
-            {
-                Message = Message.Substring(0, Message.LastIndexOf(Environment.NewLine));
-            }
-
-            string ClientMessage = "Client " + packet.Sender.Client.Handle + ": " + Message;
-            Console.WriteLine(ClientMessage);
-
-            //Packet we send out to clients.
-            Packet returnPacket = new Packet(packet.Sender, EPacketType.ChatMessage, System.Text.Encoding.Unicode.GetBytes(ClientMessage));
-
-            _packetsToSend.Enqueue(returnPacket);
         }
 
         async Task AcceptConnectionsAsync()
@@ -147,22 +154,43 @@ namespace SimpleServer
 
                 //Create databuffer with packetSize.
                 byte[] packetData = new byte[BitConverter.ToInt32(packetSizeBuffer, 0)];
+                //Read actual packet.
                 stream.Read(packetData, 0, packetData.Length);
 
+                //Queue this packet up to be handled.
                 _packetsRecieved.Enqueue(PacketConverter.ReadPacketFromByteArray(client, packetData));
             }
         }
 
+        public void RegisterPacketHandler(EPacketType packetType, HandlePacketDelegate packetDelegate)
+        {
+            HandlePacketDelegate existingDelegate;
+            if (_packetHandlers.TryGetValue(packetType, out existingDelegate))
+            {
+                existingDelegate += packetDelegate;
+            }
+            else
+            {
+                _packetHandlers.Add(packetType, packetDelegate);
+            }
+        }
+
+        /*
+         * Queues a packet to be sent to all clients.
+         */
+        public void QueuePacket(Packet packet)
+        {
+            _packetsToSend.Enqueue(packet);
+        }
+
         void OnClientConnected(TcpClient newClient)
         {
-            //TODO EVENT
             Console.WriteLine("Client {0} connected!", newClient.Client.Handle);
         }
 
         void OnClientDisconnected(TcpClient client)
         {
             Console.WriteLine("Client {0} disconnected!", client.Client.Handle);
-
         }
     }
 }

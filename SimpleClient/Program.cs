@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,84 +12,43 @@ namespace SimpleClient
     {
         static void Main(string[] args)
         {
+            //Set up console.
             Console.Title = "SimpleClient";
             Console.InputEncoding = System.Text.Encoding.Unicode;
             Console.OutputEncoding = System.Text.Encoding.Unicode;
 
             //Create client.
             SimpleClient simpleClient = new SimpleClient();
+            ClientPacketHandler packetHandler = new ClientPacketHandler(simpleClient);
+
+            //Run client.
+            simpleClient.Run();
         }
     }
-    class SimpleClient
+    public class SimpleClient
     {
         //Our connection to the server.
         TcpClient _tcpClient;
 
         //Queue of packets to send to server.
-        ConcurrentQueue<byte[]> _packetsToSend;
+        ConcurrentQueue<Packet> _packetsToSend;
 
         //Queue of packets recieved from the server.
         ConcurrentQueue<Packet> _packetsRecieved;
 
-        CancellationTokenSource cancellationTokenSource;
+        CancellationTokenSource _cancellationTokenSource;
+
+        //Packet handlers.
+        Dictionary<EPacketType, HandlePacketDelegate> _packetHandlers;
 
         public SimpleClient()
         {
-            SetUpServerConnection();
-
-            _packetsToSend = new ConcurrentQueue<byte[]>();
+            _packetsToSend = new ConcurrentQueue<Packet>();
             _packetsRecieved = new ConcurrentQueue<Packet>();
 
-            cancellationTokenSource = new CancellationTokenSource();
+            _cancellationTokenSource = new CancellationTokenSource();
 
-            Console.WriteLine("Connected to server!");
-
-            //Start listening to input on secondary thread.
-            Thread inputThread = new Thread(new ThreadStart(HandleInput));
-            inputThread.Start();
-
-            //Accept packets from server in async.
-            _ = AcceptServerPacketAsync(_tcpClient, cancellationTokenSource.Token);
-
-            Console.WriteLine("Starting packet sending..");
-
-            //At this point we have connected. Let's send some messages until we aren't.
-            while (_tcpClient.Connected)
-            {
-                Thread.Sleep(50);
-
-                //Go through all PacketsToSend and send them.
-                byte[] packetBuffer;
-                NetworkStream stream = _tcpClient.GetStream();
-
-                while (_packetsToSend.TryDequeue(out packetBuffer))
-                {
-                    stream.Write(packetBuffer, 0, packetBuffer.Length);
-                }
-
-                Packet packet;
-                while(_packetsRecieved.TryDequeue(out packet))
-                {
-                    switch(packet.PacketType)
-                    {
-                        case EPacketType.ChatMessage:
-                            //Convert message to unicode string
-                            string Message = System.Text.Encoding.Unicode.GetString(packet.Data, 0, packet.Data.Length - 1);
-
-                            //Remove newline at the end of string if it exists.
-                            if (Message.EndsWith(Environment.NewLine))
-                            {
-                                Message = Message.Substring(0, Message.LastIndexOf(Environment.NewLine));
-                            }
-
-                            Console.WriteLine(Message);
-                            break;
-                    }
-                }
-            }
-
-            Console.WriteLine("Disconnected from server. Press ENTER to exit.");
-            Console.ReadLine();
+            _packetHandlers = new Dictionary<EPacketType, HandlePacketDelegate>();
         }
 
         ~SimpleClient()
@@ -125,6 +85,72 @@ namespace SimpleClient
             }
         }
 
+        /*
+         * Registers a packet handler.
+         */
+        public void RegisterPacketHandler(EPacketType packetType, HandlePacketDelegate packetDelegate)
+        {
+            HandlePacketDelegate existingDelegate;
+            if (_packetHandlers.TryGetValue(packetType, out existingDelegate))
+            {
+                existingDelegate += packetDelegate;
+            }
+            else
+            {
+                _packetHandlers.Add(packetType, packetDelegate);
+            }
+        }
+
+        /*
+         * Run the client.
+         * Starts server connection and packet sending.
+         */
+        public void Run()
+        {
+            SetUpServerConnection();
+            Console.WriteLine("Connected to server!");
+
+            //Start listening to input on secondary thread.
+            Thread inputThread = new Thread(new ThreadStart(HandleInput));
+            inputThread.Start();
+
+            //Accept packets from server in async.
+            _ = AcceptServerPacketAsync(_tcpClient, _cancellationTokenSource.Token);
+
+            Console.WriteLine("Starting packet sending..");
+
+            //At this point we have connected. Let's send some messages until we aren't.
+            while (_tcpClient.Connected)
+            {
+                Thread.Sleep(50);
+
+                //Go through all PacketsToSend and send them.
+                Packet packet;
+                NetworkStream stream = _tcpClient.GetStream();
+
+                while (_packetsToSend.TryDequeue(out packet))
+                {
+                    //Convert packet to byte array.
+                    byte[] packetBuffer = PacketConverter.CreatePacketByteArray(packet.PacketType, packet.Data);
+                    //Write to stream.
+                    stream.Write(packetBuffer, 0, packetBuffer.Length);
+                }
+
+                while (_packetsRecieved.TryDequeue(out packet))
+                {
+                    //Grab packet handler if it exists.
+                    HandlePacketDelegate packetDelegate;
+                    if (_packetHandlers.TryGetValue(packet.PacketType, out packetDelegate))
+                    {
+                        packetDelegate.Invoke(packet);
+                    }
+                }
+            }
+
+            Console.WriteLine("Disconnected from server. Press ENTER to exit.");
+            Console.ReadLine();
+        }
+
         async Task AcceptServerPacketAsync(TcpClient client, CancellationToken cancellationToken)
         {
             //Accept client packets until we are cancelled.
@@ -154,7 +180,7 @@ namespace SimpleClient
             byte[] messageAsBytes = System.Text.Encoding.Unicode.GetBytes(message);
 
             //Queue packet
-            _packetsToSend.Enqueue(PacketConverter.CreatePacketByteArray(EPacketType.ChatMessage, messageAsBytes));
+            _packetsToSend.Enqueue(new Packet(_tcpClient, EPacketType.ChatMessage, messageAsBytes));
         }
 
         /*
