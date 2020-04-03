@@ -20,12 +20,13 @@ namespace SimpleServer
 
             SimpleServer server = new SimpleServer();
             ServerPacketHandler serverPacketHandler = new ServerPacketHandler(server);
+            MySQLLoggingPacketHandler mySQLLoggingPacketHandler = new MySQLLoggingPacketHandler(server);
 
             server.Run();
         }
     }
 
-    class SimpleServer
+    public class SimpleServer
     {
         bool _isRunning;
 
@@ -44,7 +45,7 @@ namespace SimpleServer
         CancellationTokenSource _cancellationTokenSource;
 
         //Packet handlers.
-        Dictionary<EPacketType, HandlePacketDelegate> _packetHandlers;
+        Dictionary<EPacketType, List<HandlePacketDelegate>> _packetHandlers;
 
         public SimpleServer()
         {
@@ -61,7 +62,7 @@ namespace SimpleServer
 
             _cancellationTokenSource = new CancellationTokenSource();
 
-            _packetHandlers = new Dictionary<EPacketType, HandlePacketDelegate>();
+            _packetHandlers = new Dictionary<EPacketType, List<HandlePacketDelegate>>();
         }
 
         /*
@@ -83,10 +84,13 @@ namespace SimpleServer
                 while (_packetsRecieved.TryDequeue(out packet))
                 {
                     //Grab packet handler if it exists.
-                    HandlePacketDelegate packetDelegate;
+                    List<HandlePacketDelegate> packetDelegate;
                     if (_packetHandlers.TryGetValue(packet.PacketType, out packetDelegate))
                     {
-                        packetDelegate.Invoke(packet);
+                        foreach(HandlePacketDelegate pDel in packetDelegate)
+                        {
+                            pDel.Invoke(packet);
+                        }
                     }
                 }
 
@@ -164,14 +168,16 @@ namespace SimpleServer
 
         public void RegisterPacketHandler(EPacketType packetType, HandlePacketDelegate packetDelegate)
         {
-            HandlePacketDelegate existingDelegate;
+            List<HandlePacketDelegate> existingDelegate;
             if (_packetHandlers.TryGetValue(packetType, out existingDelegate))
             {
-                existingDelegate += packetDelegate;
+                existingDelegate.Add(packetDelegate);
             }
             else
             {
-                _packetHandlers.Add(packetType, packetDelegate);
+                List<HandlePacketDelegate> newList = new List<HandlePacketDelegate>();
+                newList.Add(packetDelegate);
+                _packetHandlers.Add(packetType, new List<HandlePacketDelegate>(newList));
             }
         }
 

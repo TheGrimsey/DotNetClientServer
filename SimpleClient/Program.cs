@@ -122,8 +122,6 @@ namespace SimpleClient
             //At this point we have connected. Let's send some messages until we aren't.
             while (_tcpClient.Connected)
             {
-                Thread.Sleep(50);
-
                 //Go through all PacketsToSend and send them.
                 Packet packet;
                 NetworkStream stream = _tcpClient.GetStream();
@@ -145,6 +143,8 @@ namespace SimpleClient
                         packetDelegate.Invoke(packet);
                     }
                 }
+
+                Thread.Sleep(50);
             }
 
             Console.WriteLine("Disconnected from server. Press ENTER to exit.");
